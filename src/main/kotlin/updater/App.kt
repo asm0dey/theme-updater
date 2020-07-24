@@ -34,9 +34,13 @@ fun main() {
                     bot.sendMessage(chatId, "Sorry, empty topic")
                     return@command
                 }
+                val mention = with(update.message?.from){
+                    val user = this?.let { it.username?: listOfNotNull(it.lastName, it.firstName).joinToString(" ") }
+                    "[$user](tg://user?id=${this?.id})"
+                }
                 db.getRepository<ThemeInfo> {
                     val foundInfo = find(ThemeInfo::channel eq chatId).firstOrNull()
-                    val task = "\uD83D\uDCCC _${LocalDate.now()}_: $text"
+                    val task = "\uD83D\uDCCC _${LocalDate.now()}_: $text | by $mention"
                     if (foundInfo == null) {
                         bot
                                 .sendMessage(chatId, "1. $task", parseMode = MARKDOWN)

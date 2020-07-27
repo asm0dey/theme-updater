@@ -6,6 +6,7 @@ import com.github.kotlintelegrambot.dispatch
 import com.github.kotlintelegrambot.dispatcher.command
 import com.github.kotlintelegrambot.entities.ParseMode.MARKDOWN
 import com.github.kotlintelegrambot.network.fold
+import org.apache.commons.lang3.text.translate.LookupTranslator
 import org.dizitart.kno2.filters.eq
 import org.dizitart.kno2.getRepository
 import org.dizitart.kno2.nitrite
@@ -20,7 +21,7 @@ val db = nitrite {
     file = Paths.get(System.getProperty("user.home"), ".theme_updater.rc").toFile()
     autoCommitBufferSize = 2048
     compress = false
-    autoCompact = false
+    autoCompact = true
 }
 
 fun main() {
@@ -28,14 +29,14 @@ fun main() {
     val bot = bot {
         token = "api"
         dispatch {
-            command("addtopic") { bot, update, _ ->
+            command("addtopic") { bot, update ->
                 val chatId = update.message?.chat?.id ?: return@command
-                val text = update.message?.text?.replace(Regex("/addtopic(@[a-zA-Z0-9_]+)? "), "") ?: let {
+                val text = -(update.message?.text?.replace(Regex("/addtopic(@[a-zA-Z0-9_]+)? "), "") ?: let {
                     bot.sendMessage(chatId, "Sorry, empty topic")
                     return@command
-                }
-                val mention = with(update.message?.from){
-                    val user = this?.let { it.username?: listOfNotNull(it.lastName, it.firstName).joinToString(" ") }
+                })
+                val mention = with(update.message?.from) {
+                    val user = this?.let { it.username ?: listOfNotNull(it.lastName, it.firstName).joinToString(" ") }
                     "[$user](tg://user?id=${this?.id})"
                 }
                 db.getRepository<ThemeInfo> {
@@ -48,15 +49,17 @@ fun main() {
                                     val messageId = ok?.result?.messageId ?: return@fold
                                     bot.pinChatMessage(chatId, messageId, disableNotification = true)
                                     insert(ThemeInfo(chatId, messageId, listOf(task)))
+                                    bot.okReply(chatId, update.message?.messageId)
+                                }, {
+                                    bot.failedReply(chatId, update.message?.messageId)
                                 })
                     } else {
-
                         val newTasks = foundInfo.tasks + task
-                        updatePinnedMessage(newTasks, bot, foundInfo, chatId)
+                        updatePinnedMessage(newTasks, bot, foundInfo, chatId, update.message?.messageId)
                     }
                 }
             }
-            command("remove") { bot, update, _ ->
+            command("remove") { bot, update ->
                 val chatId = update.message?.chat?.id ?: return@command
                 val text = update.message?.text?.replace(Regex("/remove(@[a-zA-Z0-9_]+)?\\s+"), "")?.toIntOrNull()
                         ?: let {
@@ -69,8 +72,7 @@ fun main() {
                         return@getRepository
                     }
                     val newTasks = foundInfo.tasks.filterIndexed { index, _ -> index + 1 != text }
-                    updatePinnedMessage(newTasks, bot, foundInfo, chatId)
-
+                    updatePinnedMessage(newTasks, bot, foundInfo, chatId, update.message?.messageId)
                 }
             }
             command("help") { bot, update ->
@@ -82,7 +84,7 @@ fun main() {
                     |`/list` — Актуальные темы
                     |`/help` — это сообщение""".trimMargin(), parseMode = MARKDOWN)
             }
-            command("list"){bot, update ->
+            command("list") { bot, update ->
                 val chatId = update.message?.chat?.id ?: return@command
                 db.getRepository<ThemeInfo> {
                     val foundInfo = find(ThemeInfo::channel eq chatId).firstOrNull() ?: kotlin.run {
@@ -93,21 +95,53 @@ fun main() {
                     bot.sendMessage(chatId, msg, parseMode = MARKDOWN)
                 }
             }
+            command("recreate") { bot, update ->
+                val chatId = update.message?.chat?.id ?: return@command
+                db.getRepository<ThemeInfo> {
+                    val foundInfo = find(ThemeInfo::channel eq chatId).firstOrNull()
+                    if (foundInfo == null) {
+                        bot.sendMessage(chatId, "Unsupported chat! `(╯°□°)╯︵ ┻━┻`", parseMode = MARKDOWN)
+                    } else {
+                        bot.sendMessage(chatId, messageFromTasks(foundInfo.tasks), parseMode = MARKDOWN).fold({
+                            update(foundInfo.copy(messageId = it?.result?.messageId ?: return@fold))
+                        })
+                    }
+                }
+
+            }
         }
     }
     bot.startPolling()
 }
 
-private fun ObjectRepository<ThemeInfo>.updatePinnedMessage(newTasks: List<String>, bot: Bot, foundInfo: ThemeInfo, chatId: Long) {
+private fun ObjectRepository<ThemeInfo>.updatePinnedMessage(newTasks: List<String>, bot: Bot, foundInfo: ThemeInfo, chatId: Long, messageId: Long?) {
     val newTasksText = messageFromTasks(newTasks)
     bot
             .editMessageText(foundInfo.channel, foundInfo.messageId, text = if (newTasksText.isBlank()) "Нету тем `¯\\_(ツ)_/¯`" else newTasksText, parseMode = MARKDOWN)
             .fold({
                 update(foundInfo.copy(tasks = newTasks))
+                bot.pinChatMessage(chatId, foundInfo.messageId, disableNotification = true)
+                bot.okReply(chatId, messageId)
+            }, {
+                it.exception?.printStackTrace()
+                bot.failedReply(chatId, messageId)
             })
-    bot.pinChatMessage(chatId, foundInfo.messageId, disableNotification = true)
+}
+
+private fun Bot.okReply(chatId: Long, messageId: Long?) {
+    sendMessage(chatId, replyToMessageId = messageId, text = "✔️")
+}
+
+private fun Bot.failedReply(chatId: Long, messageId: Long?) {
+    sendMessage(chatId, replyToMessageId = messageId, text = "❌")
 }
 
 private fun messageFromTasks(tasks: List<String>): String {
-    return tasks.mapIndexed { index, s -> "${index + 1}. $s" }.joinToString("\n")
+    return tasks.mapIndexed { index, s -> "${index + 1}. $s" }.joinToString("\n", postfix = "\n")
 }
+
+val lookupTranslator = LookupTranslator(
+        arrayOf("_", "\\_")
+)
+
+private operator fun String.unaryMinus(): String = lookupTranslator.translate(this)

@@ -31,10 +31,17 @@ fun main() {
         dispatch {
             command("addtopic") { bot, update ->
                 val chatId = update.message?.chat?.id ?: return@command
-                val text = -(update.message?.text?.replace(Regex("/addtopic(@[a-zA-Z0-9_]+)? "), "") ?: let {
-                    bot.sendMessage(chatId, "Sorry, empty topic")
-                    return@command
-                })
+                val text = (
+                        update
+                                .message
+                                ?.text
+                                ?.replace(Regex("/addtopic(@[a-zA-Z0-9_]+)? "), "")
+                                ?.takeIf { it.isNotBlank() }
+                                ?.escape()
+                                ?: let {
+                                    bot.sendMessage(chatId, "Sorry, empty topic")
+                                    return@command
+                                })
                 val mention = with(update.message?.from) {
                     val user = this?.let { it.username ?: listOfNotNull(it.lastName, it.firstName).joinToString(" ") }
                     "[$user](tg://user?id=${this?.id})"
@@ -99,13 +106,10 @@ fun main() {
                 val chatId = update.message?.chat?.id ?: return@command
                 db.getRepository<ThemeInfo> {
                     val foundInfo = find(ThemeInfo::channel eq chatId).firstOrNull()
-                    if (foundInfo == null) {
-                        bot.sendMessage(chatId, "Unsupported chat! `(╯°□°)╯︵ ┻━┻`", parseMode = MARKDOWN)
-                    } else {
-                        bot.sendMessage(chatId, messageFromTasks(foundInfo.tasks), parseMode = MARKDOWN).fold({
-                            update(foundInfo.copy(messageId = it?.result?.messageId ?: return@fold))
-                        })
-                    }
+                    if (foundInfo == null) bot.sendMessage(chatId, "Unsupported chat! `(╯°□°)╯︵ ┻━┻`", parseMode = MARKDOWN)
+                    else bot.sendMessage(chatId, messageFromTasks(foundInfo.tasks), parseMode = MARKDOWN).fold({
+                        update(foundInfo.copy(messageId = it?.result?.messageId ?: return@fold))
+                    })
                 }
 
             }
@@ -144,4 +148,4 @@ val lookupTranslator = LookupTranslator(
         arrayOf("_", "\\_")
 )
 
-private operator fun String.unaryMinus(): String = lookupTranslator.translate(this)
+private fun String?.escape(): String? = lookupTranslator.translate(this)

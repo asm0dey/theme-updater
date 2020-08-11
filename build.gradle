@@ -11,6 +11,7 @@ plugins {
     // Apply the application plugin to add support for building a CLI application.
     id 'application'
     id 'com.github.johnrengelman.shadow' version '6.0.0'
+    id "no.systemfabrikken.systemdplugin" version "1.0"
 }
 
 repositories {
@@ -45,6 +46,7 @@ application {
 
 compileKotlin {
     kotlinOptions.jvmTarget = "1.8"
+    kotlinOptions.freeCompilerArgs = ["-Xopt-in=kotlin.RequiresOptIn"]
 }
 compileTestKotlin {
     kotlinOptions.jvmTarget = "1.8"

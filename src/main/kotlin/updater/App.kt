@@ -4,7 +4,9 @@ import com.github.kotlintelegrambot.Bot
 import com.github.kotlintelegrambot.bot
 import com.github.kotlintelegrambot.dispatch
 import com.github.kotlintelegrambot.dispatcher.command
+import com.github.kotlintelegrambot.entities.Message
 import com.github.kotlintelegrambot.entities.ParseMode.MARKDOWN
+import com.github.kotlintelegrambot.entities.Update
 import com.github.kotlintelegrambot.network.fold
 import org.apache.commons.lang3.text.translate.LookupTranslator
 import org.dizitart.kno2.filters.eq
@@ -16,6 +18,9 @@ import java.nio.file.Paths
 import java.time.LocalDate
 
 data class ThemeInfo(@Id val channel: Long, val messageId: Long, val tasks: List<String> = listOf())
+data class ShortList(@Id val channel: Long, val topics: Set<ShortlistTopic> = setOf())
+
+data class ShortlistTopic(val id: Int, val text: String)
 
 val db = nitrite {
     file = Paths.get(System.getProperty("user.home"), ".theme_updater.rc").toFile()
@@ -24,24 +29,20 @@ val db = nitrite {
     autoCompact = true
 }
 
+@OptIn(ExperimentalStdlibApi::class)
 fun main() {
 
     val bot = bot {
-        token = "api"
+        token = "1290885723:AAHnqrVzHr_7KTiazwGMWlK9KaMNYgKOV04"
         dispatch {
             command("addtopic") { bot, update ->
                 val chatId = update.message?.chat?.id ?: return@command
-                val text = (
-                        update
-                                .message
-                                ?.text
-                                ?.replace(Regex("/addtopic(@[a-zA-Z0-9_]+)? "), "")
-                                ?.takeIf { it.isNotBlank() }
-                                ?.escape()
-                                ?: let {
-                                    bot.sendMessage(chatId, "Sorry, empty topic")
-                                    return@command
-                                })
+                val text = update
+                        .updatesText()
+                        ?: let {
+                            bot.sendMessage(chatId, "Sorry, empty topic")
+                            return@command
+                        }
                 val mention = with(update.message?.from) {
                     val user = this?.let { it.username ?: listOfNotNull(it.lastName, it.firstName).joinToString(" ") }
                     "[$user](tg://user?id=${this?.id})"
@@ -70,7 +71,7 @@ fun main() {
                 val chatId = update.message?.chat?.id ?: return@command
                 val text = update.message?.text?.replace(Regex("/remove(@[a-zA-Z0-9_]+)?\\s+"), "")?.toIntOrNull()
                         ?: let {
-                            bot.sendMessage(chatId, "NoSuchElementException `(╯°□°)╯︵ ┻━┻`", parseMode = MARKDOWN)
+                            bot.throwTable(chatId, "NoSuchElementException")
                             return@command
                         }
                 db.getRepository<ThemeInfo> {
@@ -89,13 +90,18 @@ fun main() {
                     |`/addtopic` <text> — добавить тему для обсуждения
                     |`/remove` <number> — удалить тему по номеру из списка на обсуждение
                     |`/list` — Актуальные темы
-                    |`/help` — это сообщение""".trimMargin(), parseMode = MARKDOWN)
+                    |`/help` — это сообщение
+                    |`/shortlist`:
+                    |  - `add` <number> - Add topic to shortlist by id
+                    |  - `remove` <number> - Remove topic from shortlist by id
+                    |  - `print` - Print current shortlist
+                    |  - `done` - Purge shortlist adnd remove all it's items from long list""".trimMargin(), parseMode = MARKDOWN)
             }
             command("list") { bot, update ->
                 val chatId = update.message?.chat?.id ?: return@command
                 db.getRepository<ThemeInfo> {
                     val foundInfo = find(ThemeInfo::channel eq chatId).firstOrNull() ?: kotlin.run {
-                        bot.sendMessage(chatId, "Unsupported chat! `(╯°□°)╯︵ ┻━┻`", parseMode = MARKDOWN)
+                        bot.throwTable(chatId, "Unsupported chat!")
                         return@getRepository
                     }
                     val msg = messageFromTasks(foundInfo.tasks)
@@ -106,17 +112,106 @@ fun main() {
                 val chatId = update.message?.chat?.id ?: return@command
                 db.getRepository<ThemeInfo> {
                     val foundInfo = find(ThemeInfo::channel eq chatId).firstOrNull()
-                    if (foundInfo == null) bot.sendMessage(chatId, "Unsupported chat! `(╯°□°)╯︵ ┻━┻`", parseMode = MARKDOWN)
+                    if (foundInfo == null) bot.throwTable(chatId, "Unsupported chat!")
                     else bot.sendMessage(chatId, messageFromTasks(foundInfo.tasks), parseMode = MARKDOWN).fold({
                         update(foundInfo.copy(messageId = it?.result?.messageId ?: return@fold))
                     })
                 }
 
             }
+            command("shortlist") { bot, update, list ->
+                val chatId = update.message?.chat?.id ?: return@command
+                if (list.isEmpty()) bot.throwTable(chatId, "Subcommand is not passed!")
+                val subCommands = ArrayDeque(list)
+                when (subCommands.removeFirst()) {
+                    "add" -> addToShorlist(bot, update, chatId, subCommands)
+                    "remove" -> removeFromShortlist(bot, update, chatId, subCommands)
+                    "print" -> db.getRepository<ShortList>() {
+                        val shortList = find(ShortList::channel eq chatId).firstOrNull() ?: run {
+                            bot.throwTable(chatId, "No shortlist yet!")
+                            return@getRepository
+                        }
+                        val text = shortList.topics.joinToString("\n") { "${it.id}: ${it.text}" }
+                        bot.sendMessage(chatId, text, parseMode = MARKDOWN)
+                    }
+                    "done" -> {
+                        db.getRepository<ShortList>() {
+                            val shortList = find(ShortList::channel eq chatId).firstOrNull() ?: run {
+                                bot.throwTable(chatId, "No shortlist yet!")
+                                return@getRepository
+                            }
+                            val toRemove = shortList.topics.asSequence().map { it.id }.sortedDescending().toList()
+                            db.getRepository<ThemeInfo>() {
+                                val themeInfo = find(ThemeInfo::channel eq chatId).first()
+                                val filtered = themeInfo.tasks.filterIndexed { idx, _ -> !toRemove.contains(idx + 1) }
+                                updatePinnedMessage(filtered, bot, themeInfo, chatId, themeInfo.messageId)
+                            }
+                            update(shortList.copy(topics = setOf()))
+
+                        }
+
+                    }
+                }
+            }
         }
     }
     bot.startPolling()
 }
+
+@ExperimentalStdlibApi
+private fun removeFromShortlist(bot: Bot, update: Update, chatId: Long, subCommands: ArrayDeque<String>) {
+    if (subCommands.size != 1 || subCommands[0].toIntOrNull() == null) {
+        bot.throwTable(chatId, "Provide me wid id of topic (ONE)!")
+        return
+    }
+    val topicId = subCommands[0].toInt()
+    db.getRepository<ShortList>() {
+        val shortList = find(ShortList::channel eq chatId).firstOrNull() ?: run {
+            bot.throwTable(chatId, "Unsupported chat!")
+            return@getRepository
+        }
+        val newTopics = shortList.topics.filterNot { it.id == topicId }.toSet()
+        update(shortList.copy(topics = newTopics))
+        bot.okReply(chatId, update.message?.messageId)
+    }
+}
+
+@ExperimentalStdlibApi
+private fun addToShorlist(bot: Bot, update: Update, chatId: Long, subCommands: ArrayDeque<String>) {
+    if (subCommands.size != 1 || subCommands[0].toIntOrNull() == null) {
+        bot.throwTable(chatId, "Provide me wid id of topic (ONE)!")
+        return
+    }
+    val topicId = subCommands[0].toInt()
+    db.getRepository<ThemeInfo> {
+        val foundInfo = find(ThemeInfo::channel eq chatId).firstOrNull()
+        if (foundInfo == null) bot.throwTable(chatId, "Unsupported chat!")
+        else {
+            val topic = foundInfo.tasks[topicId - 1]
+            db.getRepository<ShortList>() {
+                val shortList = find(ShortList::channel eq chatId).firstOrNull() ?: run {
+                    insert(ShortList(chatId))
+                    find(ShortList::channel eq chatId).first()
+                }
+                val newTopics = shortList.topics + ShortlistTopic(topicId, topic)
+                update(shortList.copy(topics = newTopics))
+                bot.okReply(chatId, update.message?.messageId)
+            }
+        }
+    }
+}
+
+private fun Bot.throwTable(chatId: Long, message: String) {
+    sendMessage(chatId, "$message `(╯°□°)╯︵ ┻━┻`", parseMode = MARKDOWN)
+}
+
+private fun Update.updatesText(): String? = message
+        ?.messageText()
+        ?.replace(Regex("/addtopic(@[a-zA-Z0-9_]+)? "), "")
+        ?.takeIf { it.isNotBlank() }
+        ?.escape()
+
+private fun Message.messageText(): String? = replyToMessage?.text ?: text
 
 private fun ObjectRepository<ThemeInfo>.updatePinnedMessage(newTasks: List<String>, bot: Bot, foundInfo: ThemeInfo, chatId: Long, messageId: Long?) {
     val newTasksText = messageFromTasks(newTasks)
@@ -147,5 +242,6 @@ private fun messageFromTasks(tasks: List<String>): String {
 val lookupTranslator = LookupTranslator(
         arrayOf("_", "\\_")
 )
+
 
 private fun String?.escape(): String? = lookupTranslator.translate(this)

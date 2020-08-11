@@ -33,7 +33,7 @@ val db = nitrite {
 fun main() {
 
     val bot = bot {
-        token = "1290885723:AAHnqrVzHr_7KTiazwGMWlK9KaMNYgKOV04"
+        token = "notoken"
         dispatch {
             command("addtopic") { bot, update ->
                 val chatId = update.message?.chat?.id ?: return@command

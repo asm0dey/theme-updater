@@ -8,12 +8,22 @@ import com.github.kotlintelegrambot.entities.Message
 import com.github.kotlintelegrambot.entities.ParseMode.MARKDOWN
 import com.github.kotlintelegrambot.entities.Update
 import com.github.kotlintelegrambot.network.fold
+import com.github.kotlintelegrambot.webhook
+import io.ktor.application.*
+import io.ktor.http.HttpStatusCode.Companion.OK
+import io.ktor.request.*
+import io.ktor.response.*
+import io.ktor.routing.*
+import io.ktor.server.engine.*
+import io.ktor.server.netty.*
 import org.apache.commons.lang3.text.translate.LookupTranslator
 import org.dizitart.kno2.filters.eq
 import org.dizitart.kno2.getRepository
 import org.dizitart.kno2.nitrite
 import org.dizitart.no2.objects.Id
 import org.dizitart.no2.objects.ObjectRepository
+import org.dizitart.no2.tool.Exporter
+import java.io.File
 import java.nio.file.Paths
 import java.time.LocalDate
 
@@ -29,11 +39,18 @@ val db = nitrite {
     autoCompact = true
 }
 
+val TOKEN = "notoken"
+
+
 @OptIn(ExperimentalStdlibApi::class)
 fun main() {
 
     val bot = bot {
-        token = "notoken"
+        webhook {
+            url = "https://theme-updater.bots.asm0dey.ru/$TOKEN"
+            maxConnections = 50
+            token = TOKEN
+        }
         dispatch {
             command("addtopic") { bot, update ->
                 val chatId = update.message?.chat?.id ?: return@command
@@ -153,9 +170,38 @@ fun main() {
                     }
                 }
             }
+            command("export") { bot, update ->
+                val tmp = File.createTempFile("export", ".dat").also { it.deleteOnExit() }
+                Exporter.of(db)
+                        .exportTo(tmp)
+                bot.sendDocument(
+                        update.message?.chat?.id ?: return@command,
+                        tmp,
+                        "#dump from ${LocalDate.now()}",
+                        replyToMessageId = update.message?.messageId
+                )
+                tmp.delete()
+            }
         }
     }
-    bot.startPolling()
+    bot.startWebhook()
+
+    val env = applicationEngineEnvironment {
+        module {
+            routing {
+                post("/$TOKEN") {
+                    val response = call.receiveText()
+                    bot.processUpdate(response)
+                    call.respond(OK)
+                }
+            }
+        }
+        connector {
+            host = "127.0.0.1"
+            port = 7443
+        }
+    }
+    embeddedServer(Netty, env).start(wait = true)
 }
 
 @ExperimentalStdlibApi
@@ -207,7 +253,8 @@ private fun Bot.throwTable(chatId: Long, message: String) {
 
 private fun Update.updatesText(): String? = message
         ?.messageText()
-        ?.replace(Regex("/addtopic(@[a-zA-Z0-9_]+)? "), "")
+        ?.replace(Regex("/addtopic(@[a-zA-Z0-9_]+)?"), "")
+        ?.trim()
         ?.takeIf { it.isNotBlank() }
         ?.escape()
 

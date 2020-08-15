@@ -37,6 +37,8 @@ dependencies {
             strictly '3.8.0'
         }
     }
+    implementation "io.ktor:ktor-server-core:1.3.2"
+    compile "io.ktor:ktor-server-netty:1.3.2"
 }
 
 application {

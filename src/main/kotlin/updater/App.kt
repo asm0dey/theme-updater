@@ -10,6 +10,7 @@ import com.github.kotlintelegrambot.entities.Update
 import com.github.kotlintelegrambot.network.fold
 import com.github.kotlintelegrambot.webhook
 import io.ktor.application.*
+import io.ktor.features.*
 import io.ktor.http.HttpStatusCode.Companion.OK
 import io.ktor.request.*
 import io.ktor.response.*
@@ -46,10 +47,11 @@ val TOKEN = "notoken"
 fun main() {
 
     val bot = bot {
+        token = TOKEN
         webhook {
-            url = "https://theme-updater.bots.asm0dey.ru/$TOKEN"
+            url = "https://theme-updater.bot.asm0dey.ru/$TOKEN"
             maxConnections = 50
-            token = TOKEN
+            allowedUpdates = listOf()
         }
         dispatch {
             command("addtopic") { bot, update ->
@@ -188,6 +190,7 @@ fun main() {
 
     val env = applicationEngineEnvironment {
         module {
+            install(CallLogging)
             routing {
                 post("/$TOKEN") {
                     val response = call.receiveText()

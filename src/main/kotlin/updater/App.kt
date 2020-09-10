@@ -142,6 +142,7 @@ fun main() {
                 val chatId = update.message?.chat?.id ?: return@command
                 if (list.isEmpty()) bot.throwTable(chatId, "Subcommand is not passed!")
                 val subCommands = ArrayDeque(list)
+                if (subCommands.isEmpty()) bot.throwTable(chatId, "Subcommand is not passed!")
                 when (subCommands.removeFirst()) {
                     "add" -> addToShorlist(bot, update, chatId, subCommands)
                     "remove" -> removeFromShortlist(bot, update, chatId, subCommands)

@@ -157,6 +157,10 @@ fun main() {
                         bot.sendMessage(chatId, text, parseMode = MARKDOWN)
                     }
                     "done" -> {
+                        if (subCommands.size > 0) {
+                            bot.throwTable(chatId, "done is not accepting any params")
+                            return@command
+                        }
                         db.getRepository<ShortList> {
                             val shortList = find(ShortList::channel eq chatId).firstOrNull() ?: run {
                                 bot.throwTable(chatId, "No shortlist yet!")

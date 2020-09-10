@@ -1,3 +1,5 @@
+@file:Suppress("DEPRECATION")
+
 package updater
 
 import com.github.kotlintelegrambot.Bot
@@ -27,6 +29,7 @@ import org.dizitart.no2.tool.Exporter
 import java.io.File
 import java.nio.file.Paths
 import java.time.LocalDate
+import java.util.ArrayDeque
 
 data class ThemeInfo(@Id val channel: Long, val messageId: Long, val tasks: List<String> = listOf())
 data class ShortList(@Id val channel: Long, val topics: Set<ShortlistTopic> = setOf())
@@ -43,7 +46,6 @@ val db = nitrite {
 val TOKEN = "notoken"
 
 
-@OptIn(ExperimentalStdlibApi::class)
 fun main() {
 
     val bot = bot {
@@ -146,7 +148,7 @@ fun main() {
                 when (subCommands.removeFirst()) {
                     "add" -> addToShorlist(bot, update, chatId, subCommands)
                     "remove" -> removeFromShortlist(bot, update, chatId, subCommands)
-                    "print" -> db.getRepository<ShortList>() {
+                    "print" -> db.getRepository<ShortList> {
                         val shortList = find(ShortList::channel eq chatId).firstOrNull() ?: run {
                             bot.throwTable(chatId, "No shortlist yet!")
                             return@getRepository
@@ -155,13 +157,13 @@ fun main() {
                         bot.sendMessage(chatId, text, parseMode = MARKDOWN)
                     }
                     "done" -> {
-                        db.getRepository<ShortList>() {
+                        db.getRepository<ShortList> {
                             val shortList = find(ShortList::channel eq chatId).firstOrNull() ?: run {
                                 bot.throwTable(chatId, "No shortlist yet!")
                                 return@getRepository
                             }
                             val toRemove = shortList.topics.asSequence().map { it.id }.sortedDescending().toList()
-                            db.getRepository<ThemeInfo>() {
+                            db.getRepository<ThemeInfo> {
                                 val themeInfo = find(ThemeInfo::channel eq chatId).first()
                                 val filtered = themeInfo.tasks.filterIndexed { idx, _ -> !toRemove.contains(idx + 1) }
                                 updatePinnedMessage(filtered, bot, themeInfo, chatId, themeInfo.messageId)
@@ -208,14 +210,13 @@ fun main() {
     embeddedServer(Netty, env).start(wait = true)
 }
 
-@ExperimentalStdlibApi
 private fun removeFromShortlist(bot: Bot, update: Update, chatId: Long, subCommands: ArrayDeque<String>) {
-    if (subCommands.size != 1 || subCommands[0].toIntOrNull() == null) {
+    if (subCommands.size != 1 || subCommands.first.toIntOrNull() == null) {
         bot.throwTable(chatId, "Provide me wid id of topic (ONE)!")
         return
     }
-    val topicId = subCommands[0].toInt()
-    db.getRepository<ShortList>() {
+    val topicId = subCommands.first.toInt()
+    db.getRepository<ShortList> {
         val shortList = find(ShortList::channel eq chatId).firstOrNull() ?: run {
             bot.throwTable(chatId, "Unsupported chat!")
             return@getRepository
@@ -226,19 +227,18 @@ private fun removeFromShortlist(bot: Bot, update: Update, chatId: Long, subComma
     }
 }
 
-@ExperimentalStdlibApi
 private fun addToShorlist(bot: Bot, update: Update, chatId: Long, subCommands: ArrayDeque<String>) {
-    if (subCommands.size != 1 || subCommands[0].toIntOrNull() == null) {
+    if (subCommands.size != 1 || subCommands.first.toIntOrNull() == null) {
         bot.throwTable(chatId, "Provide me wid id of topic (ONE)!")
         return
     }
-    val topicId = subCommands[0].toInt()
+    val topicId = subCommands.first.toInt()
     db.getRepository<ThemeInfo> {
         val foundInfo = find(ThemeInfo::channel eq chatId).firstOrNull()
         if (foundInfo == null) bot.throwTable(chatId, "Unsupported chat!")
         else {
             val topic = foundInfo.tasks[topicId - 1]
-            db.getRepository<ShortList>() {
+            db.getRepository<ShortList> {
                 val shortList = find(ShortList::channel eq chatId).firstOrNull() ?: run {
                     insert(ShortList(chatId))
                     find(ShortList::channel eq chatId).first()

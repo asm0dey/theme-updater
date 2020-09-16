@@ -115,7 +115,7 @@ fun main() {
                     |`/shortlist`:
                     |  - `add` <number> - Add topic to shortlist by id
                     |  - `remove` <number> - Remove topic from shortlist by id
-                    |  - `print` - Print current shortlist
+                    |  - `print` - Print current shortlist (default)
                     |  - `done` - Purge shortlist adnd remove all it's items from long list""".trimMargin(), parseMode = MARKDOWN)
             }
             command("list") { bot, update ->
@@ -142,9 +142,8 @@ fun main() {
             }
             command("shortlist") { bot, update, list ->
                 val chatId = update.message?.chat?.id ?: return@command
-                if (list.isEmpty()) bot.throwTable(chatId, "Subcommand is not passed!")
                 val subCommands = ArrayDeque(list)
-                if (subCommands.isEmpty()) bot.throwTable(chatId, "Subcommand is not passed!")
+                if (subCommands.isEmpty()) subCommands.add("print")
                 when (subCommands.removeFirst()) {
                     "add" -> addToShorlist(bot, update, chatId, subCommands)
                     "remove" -> removeFromShortlist(bot, update, chatId, subCommands)

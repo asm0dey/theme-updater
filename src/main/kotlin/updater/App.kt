@@ -241,6 +241,10 @@ private fun addToShorlist(bot: Bot, update: Update, chatId: Long, subCommands: A
         val foundInfo = find(ThemeInfo::channel eq chatId).firstOrNull()
         if (foundInfo == null) bot.throwTable(chatId, "Unsupported chat!")
         else {
+            if (topicId > foundInfo.tasks.size) {
+                bot.throwTable(chatId, "Incorrect topic index! Longlist have only the ${foundInfo.tasks.size} topics.")
+                return@getRepository
+            }
             val topic = foundInfo.tasks[topicId - 1]
             db.getRepository<ShortList> {
                 val shortList = find(ShortList::channel eq chatId).firstOrNull() ?: run {

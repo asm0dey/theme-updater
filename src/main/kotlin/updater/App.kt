@@ -23,6 +23,7 @@ import org.apache.commons.lang3.text.translate.LookupTranslator
 import org.dizitart.kno2.filters.eq
 import org.dizitart.kno2.getRepository
 import org.dizitart.kno2.nitrite
+import org.dizitart.no2.Nitrite
 import org.dizitart.no2.objects.Id
 import org.dizitart.no2.objects.ObjectRepository
 import org.dizitart.no2.tool.Exporter
@@ -36,18 +37,18 @@ data class ShortList(@Id val channel: Long, val topics: Set<ShortlistTopic> = se
 
 data class ShortlistTopic(val id: Int, val text: String)
 
-val db = nitrite {
-    file = Paths.get(System.getProperty("user.home"), ".theme_updater.rc").toFile()
-    autoCommitBufferSize = 2048
-    compress = false
-    autoCompact = true
-}
+lateinit var db : Nitrite
 
 val TOKEN = "notoken"
 
 
 fun main() {
-
+    db = nitrite {
+        file = Paths.get(System.getProperty("user.home"), ".theme_updater.rc").toFile()
+        autoCommitBufferSize = 2048
+        compress = false
+        autoCompact = true
+    }
     val bot = bot {
         token = TOKEN
         webhook {

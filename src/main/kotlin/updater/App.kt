@@ -8,6 +8,7 @@ import com.github.kotlintelegrambot.dispatch
 import com.github.kotlintelegrambot.dispatcher.command
 import com.github.kotlintelegrambot.entities.Message
 import com.github.kotlintelegrambot.entities.ParseMode.MARKDOWN
+import com.github.kotlintelegrambot.network.ResponseError
 import com.github.kotlintelegrambot.network.fold
 import com.github.kotlintelegrambot.webhook
 import io.ktor.application.*
@@ -25,15 +26,25 @@ import org.dizitart.kno2.filters.eq
 import org.dizitart.kno2.filters.within
 import org.dizitart.kno2.getRepository
 import org.dizitart.kno2.nitrite
+import org.dizitart.kno2.sort
+import org.dizitart.no2.FindOptions
+import org.dizitart.no2.IndexType.NonUnique
+import org.dizitart.no2.IndexType.Unique
+import org.dizitart.no2.SortOrder.Ascending
+import org.dizitart.no2.objects.Cursor
 import org.dizitart.no2.objects.Id
 import org.dizitart.no2.objects.Index
 import org.dizitart.no2.objects.Indices
 import org.dizitart.no2.objects.filters.ObjectFilters.ALL
 import org.dizitart.no2.tool.Exporter
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
 import java.io.File
 import java.nio.file.Paths
 import java.time.LocalDate
 import java.util.*
+
+val LOG: Logger = LoggerFactory.getLogger("Bot ROOT")
 
 data class ThemeInfo(@Id val channel: Long, val messageId: Long, val tasks: List<String> = listOf())
 data class ShortList(@Id val channel: Long, val topics: Set<ShortlistTopic> = setOf())
@@ -71,7 +82,7 @@ val db = nitrite {
     autoCompact = true
 }
 
-val TOKEN = "notoken"
+const val TOKEN = "notoken"
 
 
 fun main() {
@@ -134,14 +145,17 @@ fun main() {
                     |  - `add` <number> - Add topic to shortlist by id
                     |  - `remove` <number> - Remove topic from shortlist by id
                     |  - `print` - Print current shortlist (default)
-                    |  - `done` - Purge shortlist adnd remove all it's items from long list""".trimMargin(),
+                    |  - `done` - Purge shortlist adnd remove all it's items from long list
+                    |`/recreate` — пересоздать прикреплённое сообщение в случае если что-то пошло не так""".trimMargin(),
                     parseMode = MARKDOWN
                 )
             }
             command("list") {
                 val chatId = message.chat.id
-                bot.sendMessage(chatId, messageFromTasks(topicsByChat(chatId)), MARKDOWN).fold {
-                    bot.failedReply(chatId, message.messageId)
+                chunkedMessage(topicsByChat(chatId)).forEach{
+                    bot.sendMessage(chatId, it, MARKDOWN).fold {
+                        bot.failedReply(chatId, message.messageId, it.toTelegramMessage())
+                    }
                 }
             }
             command("recreate") {
@@ -300,7 +314,7 @@ private fun Bot.createPinnedMessage(
             pinChatMessage(chatId, messageId, disableNotification = true)
             db.getRepository<ChannelInfo>().update(found.copy(pinnedMessageId = messageId))
         }, {
-            failedReply(chatId, sourceMessage)
+            failedReply(chatId, sourceMessage, it.toTelegramMessage())
         })
 }
 
@@ -318,15 +332,42 @@ private fun Bot.recreateList(chatId: Long) {
     db.getRepository<TopicInfoV2> {
         val foundInfo = topicsByChat(chatId)
         if (foundInfo.none()) throwTable(chatId, "Unsupported chat!")
-        else sendMessage(chatId, messageFromTasks(foundInfo), parseMode = MARKDOWN).fold({
-            val messageId = it?.result?.messageId ?: return@fold
-            unpinChatMessage(chatId)
-            pinChatMessage(chatId, messageId, disableNotification = true)
-            db.getRepository<ChannelInfo>().update(
-                ChannelInfo::channelId eq chatId,
-                documentOf("pinnedMessageId" to messageId)
-            )
-        })
+        else {
+            chunkedMessage(foundInfo)
+                .forEachIndexed { i, subMessage ->
+                    sendMessage(chatId, subMessage, parseMode = MARKDOWN).fold({
+                        val messageId = it?.result?.messageId ?: return@fold
+                        if (i == 0) {
+                            unpinChatMessage(chatId)
+                            pinChatMessage(chatId, messageId, disableNotification = true)
+                            db.getRepository<ChannelInfo>().update(
+                                ChannelInfo::channelId eq chatId,
+                                documentOf("pinnedMessageId" to messageId)
+                            )
+                        }
+                    }, {
+                        failedReply(chatId, null, it.toTelegramMessage())
+                        LOG.error(it.errorBody?.string())
+                    })
+
+                }
+        }
+    }
+}
+
+private fun chunkedMessage(topics: Cursor<TopicInfoV2>): Sequence<String> {
+    return sequence {
+        val builder = StringBuilder()
+        var next: String
+        for (word in messageFromTasks(topics).split(" ")) {
+            next = word
+            if (builder.length + next.length + 1 > 4095) {
+                yield(builder.toString())
+                builder.clear()
+                builder.append(next).append(" ")
+            } else builder.append(next).append(" ")
+        }
+        if (builder.isNotBlank()) yield(builder.toString())
     }
 }
 
@@ -417,12 +458,33 @@ private fun Bot.updatePinnedMessage(
     chatId: Long,
     sourceMessageId: Long,
 ) {
-    val newTasksText = messageFromTasks(topicsByChat(chatId))
+    val messageSequence = chunkedMessage(topicsByChat(chatId))
     val (channelId, _, messageId) = channelInfoByChat(chatId).single()
+    if (messageSequence.none()) {
+        sendMessage(channelId, "Нету тем `¯\\_(ツ)_/¯`", MARKDOWN, disableWebPagePreview = true)
+    }
+
+    messageSequence.forEachIndexed { i, subMessage ->
+        if (i == 0) {
+            updateText(channelId, messageId, subMessage, chatId, sourceMessageId)
+        } else {
+            sendMessage(channelId, subMessage, MARKDOWN, disableNotification = true)
+        }
+    }
+
+}
+
+private fun Bot.updateText(
+    channelId: Long,
+    messageId: Long?,
+    text: String,
+    chatId: Long,
+    sourceMessageId: Long
+) {
     editMessageText(
         channelId,
         messageId,
-        text = if (newTasksText.isBlank()) "Нету тем `¯\\_(ツ)_/¯`" else newTasksText,
+        text = text,
         parseMode = MARKDOWN
     )
         .fold({
@@ -430,11 +492,12 @@ private fun Bot.updatePinnedMessage(
             pinChatMessage(chatId, it?.result?.messageId!!, disableNotification = true)
             okReply(chatId, sourceMessageId)
         }, {
-            it.exception?.printStackTrace()
             recreateList(chatId)
-            failedReply(chatId, sourceMessageId)
+            LOG.warn(it.errorBody?.string())
         })
 }
+
+private fun ResponseError.toTelegramMessage() = errorBody?.string()?.let { " `$it`" } ?: ""
 
 private fun channelInfoByChat(chatId: Long) =
     db.getRepository<ChannelInfo>().find(ChannelInfo::channelId eq chatId)
@@ -446,8 +509,8 @@ private fun Bot.okReply(chatId: Long, messageId: Long?) {
     sendMessage(chatId, replyToMessageId = messageId, text = "✔️")
 }
 
-private fun Bot.failedReply(chatId: Long, messageId: Long?) {
-    sendMessage(chatId, replyToMessageId = messageId, text = "❌")
+private fun Bot.failedReply(chatId: Long, messageId: Long?, errorMessage: String) {
+    sendMessage(chatId, replyToMessageId = messageId, text = "❌$errorMessage")
 }
 
 val lookupTranslator = LookupTranslator(arrayOf("_", "\\_"))

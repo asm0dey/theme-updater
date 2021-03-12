@@ -6,12 +6,10 @@
 
 plugins {
     // Apply the Kotlin JVM plugin to add support for Kotlin.
-    id 'org.jetbrains.kotlin.jvm' version '1.3.72'
-
+    id 'org.jetbrains.kotlin.jvm' version '1.4.21-2'
     // Apply the application plugin to add support for building a CLI application.
     id 'application'
-    id 'com.github.johnrengelman.shadow' version '6.0.0'
-    id "no.systemfabrikken.systemdplugin" version "1.0"
+    id 'com.github.johnrengelman.shadow' version '6.1.0'
 }
 
 repositories {
@@ -30,17 +28,11 @@ dependencies {
 
     // Use the Kotlin JDK 8 standard library.
     implementation 'org.jetbrains.kotlin:kotlin-stdlib-jdk8'
-    implementation 'io.github.kotlin-telegram-bot.kotlin-telegram-bot:telegram:5.0.0'
-    implementation 'org.dizitart:potassium-nitrite:3.4.2'
-    implementation('com.squareup.okhttp3:okhttp') {
-        version {
-            strictly '3.8.0'
-        }
-
-    }
-    implementation "io.ktor:ktor-server-core:1.3.2"
-    compile "io.ktor:ktor-server-netty:1.3.2"
-    compileOnly "org.graalvm.nativeimage:svm:21.0.0"
+    implementation 'io.github.kotlin-telegram-bot.kotlin-telegram-bot:telegram:6.0.1'
+    implementation 'org.dizitart:potassium-nitrite:3.4.3'
+    implementation "io.ktor:ktor-server-core:1.4.1"
+    compile "io.ktor:ktor-server-netty:1.4.1"
+    implementation 'ch.qos.logback:logback-classic:1.2.3'
 }
 
 application {
